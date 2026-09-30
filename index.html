@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>영업 대시보드</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --bg:#f6f7f9; --card:#ffffff; --ink:#111827; --ink2:#4b5563; --muted:#9ca3af;
+  --line:#e5e7eb; --blue:#2563eb; --blue-soft:#bfd3fb; --blue-wash:#eef3fe;
+  --up:#059669; --down:#dc2626;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Pretendard,-apple-system,"Apple SD Gothic Neo",sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1200px;margin:0 auto;padding:24px 16px 48px;display:flex;flex-direction:column;gap:16px}
+header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+header h1{font-size:22px;margin:0;font-weight:800}
+header .sub{color:var(--muted);font-size:13px}
+header .unit{margin-left:auto;color:var(--ink2);font-size:12px}
+.notice{background:var(--blue-wash);color:#1e40af;border-radius:10px;padding:10px 14px;font-size:13px}
+.notice.err{background:#fef2f2;color:var(--down)}
+.notice:empty{display:none}
+.cards{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+.card .lbl{font-size:12px;color:var(--ink2);font-weight:600}
+.card .val{white-space:nowrap;font-size:26px;font-weight:800;margin-top:6px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.card.hero .val{font-size:36px;color:var(--blue)}
+.card .foot{font-size:12px;color:var(--ink2);margin-top:6px}
+.bar{height:8px;background:var(--line);border-radius:4px;margin-top:12px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--blue);border-radius:4px}
+.grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:12px}
+.grid2.even{grid-template-columns:1fr 1fr}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;min-width:0}
+.panel h2{font-size:15px;margin:0 0 2px}
+.panel .desc{font-size:12px;color:var(--muted);margin:0 0 12px}
+svg{display:block;width:100%;height:auto;font-family:inherit}
+.funnel{display:flex;flex-direction:column;align-items:center;gap:2px}
+.fstep{height:40px;border-radius:8px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;color:#fff;font-weight:700;min-width:150px}
+.fstep span{font-weight:500;opacity:.9}
+.conv{font-size:12px;color:var(--ink2);padding:3px 0}
+.conv b{color:var(--blue)}
+.final{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);display:flex;justify-content:space-between;font-size:13px;color:var(--ink2);width:100%}
+.final b{font-size:18px;color:var(--blue)}
+.rank{display:flex;flex-direction:column;gap:12px}
+.rrow{display:grid;grid-template-columns:22px 110px 1fr 90px;align-items:center;gap:10px}
+.rrow .no{color:var(--muted);font-weight:700}
+.rrow .nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rrow .track{height:10px;background:var(--line);border-radius:5px;overflow:hidden}
+.rrow .track i{display:block;height:100%;background:var(--blue-soft);border-radius:5px}
+.rrow:first-child .track i{background:var(--blue)}
+.rrow .amt{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+@media (max-width:900px){
+  .cards{grid-template-columns:1fr 1fr}
+  .grid2,.grid2.even{grid-template-columns:1fr}
+}
+@media (max-width:480px){
+  .card.hero{grid-column:1/-1}
+  .card.hero .val{font-size:32px}
+  .card .val{font-size:20px}
+  .card{padding:14px}
+  .rrow{grid-template-columns:18px 84px 1fr 76px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>영업 대시보드</h1>
+    <span class="sub" id="asOf"></span>
+    <span class="unit">금액 단위: 만원</span>
+  </header>
+  <div class="notice" id="notice"></div>
+
+  <section class="cards" id="cards"></section>
+
+  <section class="grid2">
+    <div class="panel">
+      <h2>월별 매출</h2>
+      <p class="desc">점선 = 월 목표 · 진한 막대 = 이번 달</p>
+      <div id="monthly"></div>
+    </div>
+    <div class="panel">
+      <h2>영업 단계</h2>
+      <p class="desc">단계 사이 숫자 = 다음 단계로 넘어간 비율</p>
+      <div id="funnel"></div>
+    </div>
+  </section>
+
+  <section class="grid2 even">
+    <div class="panel"><h2>담당자별 순위</h2><p class="desc">이번 달 계약 금액</p><div class="rank" id="person"></div></div>
+    <div class="panel"><h2>상품별 순위</h2><p class="desc">이번 달 매출</p><div class="rank" id="product"></div></div>
+  </section>
+</div>
+
+<script>
+// ================================================================
+// ▼ 여기 두 줄만 바꾸세요 (Supabase → Project Settings → API)
+//   anon 또는 publishable 키만. service_role 키는 절대 넣지 마세요.
+// ================================================================
+const SUPABASE_URL = 'https://bqpbbprpqnladecbelap.supabase.co';   // 예: 'https://abcdxyz.supabase.co'
+const SUPABASE_KEY = 'sb_publishable_rUGWR6XDwx71tWqdMYHpfQ_njteRPOv';   // 예: 'eyJhbGci...' 또는 'sb_publishable_...'
+const UNIT = '만원';
+
+// 연결 전에 화면을 미리 보기 위한 샘플 (Supabase에 넣는 SQL과 같은 숫자)
+const SAMPLE = {
+  monthly: [
+    { sort_order: 1, month: '2월', revenue: 6200, target: 9200 },
+    { sort_order: 2, month: '3월', revenue: 6900, target: 9200 },
+    { sort_order: 3, month: '4월', revenue: 7100, target: 9200 },
+    { sort_order: 4, month: '5월', revenue: 7310, target: 9200 },
+    { sort_order: 5, month: '6월', revenue: 8050, target: 9200 },
+    { sort_order: 6, month: '7월', revenue: 8470, target: 9200 },
+  ],
+  pipeline: [
+    { sort_order: 1, stage: '문의', count: 2487 },
+    { sort_order: 2, stage: '견적', count: 1140 },
+    { sort_order: 3, stage: '협상', count: 612 },
+    { sort_order: 4, stage: '계약', count: 359 },
+  ],
+  rank: [
+    { kind: 'person', name: '김도현', amount: 1820 },
+    { kind: 'person', name: '이수진', amount: 1460 },
+    { kind: 'person', name: '박민재', amount: 1280 },
+    { kind: 'product', name: '기업용 솔루션', amount: 3120 },
+    { kind: 'product', name: '프리미엄 컨설팅', amount: 2140 },
+    { kind: 'product', name: '고급형 플랜', amount: 1480 },
+  ],
+};
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const n = v => Number(v) || 0;
+const won = v => Math.round(n(v)).toLocaleString('ko-KR') + UNIT;
+const pct = v => (isFinite(v) ? (v * 100).toFixed(1) + '%' : '–');
+
+async function loadData() {
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    $('notice').textContent = '지금은 샘플 숫자예요. 코드 위쪽 SUPABASE_URL과 SUPABASE_KEY를 채우면 Supabase의 실제 숫자로 바뀝니다.';
+    return SAMPLE;
+  }
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const [m, p, r] = await Promise.all([
+    db.from('sales_monthly').select('*').order('sort_order', { ascending: true }),
+    db.from('sales_pipeline').select('*').order('sort_order', { ascending: true }),
+    db.from('sales_rank').select('*').order('amount', { ascending: false }),
+  ]);
+  const err = m.error || p.error || r.error;
+  if (err) throw new Error(err.message);
+  if (!m.data.length) throw new Error('sales_monthly 표가 비어 있거나 읽기 권한이 없어요 (보안 정책 SQL을 실행했는지 확인).');
+  return { monthly: m.data, pipeline: p.data, rank: r.data };
+}
+
+function renderCards(d) {
+  const cur = d.monthly[d.monthly.length - 1];
+  const deals = d.pipeline.length ? n(d.pipeline[d.pipeline.length - 1].count) : 0;
+  const rate = n(cur.revenue) / n(cur.target);
+  const left = n(cur.target) - n(cur.revenue);
+  $('asOf').textContent = `기준: ${cur.month}`;
+  $('cards').innerHTML = `
+    <div class="card hero"><div class="lbl">이번 달 매출 · ${esc(cur.month)}</div><div class="val">${won(cur.revenue)}</div>
+      <div class="bar"><i style="width:${Math.min(100, rate * 100).toFixed(1)}%"></i></div>
+      <div class="foot">목표 대비 <b>${pct(rate)}</b></div></div>
+    <div class="card"><div class="lbl">이번 달 목표</div><div class="val">${won(cur.target)}</div>
+      <div class="foot">${left > 0 ? `남은 금액 <b>${won(left)}</b>` : `목표보다 <b>${won(-left)}</b> 초과`}</div></div>
+    <div class="card"><div class="lbl">객단가</div><div class="val">${deals ? (n(cur.revenue) / deals).toLocaleString('ko-KR', { maximumFractionDigits: 1 }) + UNIT : '–'}</div>
+      <div class="foot">매출 ÷ 계약 건수</div></div>
+    <div class="card"><div class="lbl">계약 건수</div><div class="val">${deals.toLocaleString('ko-KR')}건</div>
+      <div class="foot">영업 단계 마지막 값</div></div>`;
+}
+
+function renderMonthly(rows) {
+  const W = 640, H = 280, L = 48, R = 12, T = 24, B = 32;
+  const max = Math.max(...rows.map(r => Math.max(n(r.revenue), n(r.target)))) * 1.12 || 1;
+  const step = Math.pow(10, Math.floor(Math.log10(max / 4)));
+  const tick = [1, 2, 2.5, 5, 10].map(k => k * step).find(t => max / t <= 5);
+  const top = Math.ceil(max / tick) * tick;
+  const y = v => T + (H - T - B) * (1 - v / top);
+  const bw = (W - L - R) / rows.length;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="월별 매출 막대그래프">`;
+  for (let v = 0; v <= top; v += tick) {
+    s += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#eef0f3"/>`;
+    s += `<text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="#9ca3af">${v.toLocaleString('ko-KR')}</text>`;
+  }
+  rows.forEach((r, i) => {
+    const last = i === rows.length - 1;
+    const w = Math.min(44, bw * 0.56), x = L + bw * i + (bw - w) / 2, yy = y(n(r.revenue)), h = y(0) - yy, rad = Math.min(5, h);
+    s += `<path d="M${x},${y(0)} V${yy + rad} Q${x},${yy} ${x + rad},${yy} H${x + w - rad} Q${x + w},${yy} ${x + w},${yy + rad} V${y(0)} Z" fill="${last ? '#2563eb' : '#bfd3fb'}"><title>${esc(r.month)} ${won(r.revenue)}</title></path>`;
+    s += `<text x="${x + w / 2}" y="${yy - 6}" text-anchor="middle" font-size="11" font-weight="${last ? 700 : 500}" fill="${last ? '#2563eb' : '#4b5563'}">${n(r.revenue).toLocaleString('ko-KR')}</text>`;
+    s += `<text x="${x + w / 2}" y="${H - 10}" text-anchor="middle" font-size="12" fill="#4b5563">${esc(r.month)}</text>`;
+  });
+  // 목표선: 달마다 목표가 다를 수 있어 월별로 이어 그림
+  const pts = rows.map((r, i) => [L + bw * i + 4, y(n(r.target)), L + bw * (i + 1) - 4]);
+  s += `<path d="${pts.map(([a, yy, b]) => `M${a},${yy} H${b}`).join(' ')}" stroke="#111827" stroke-width="1.5" stroke-dasharray="5 4" fill="none"/>`;
+  const lt = rows[rows.length - 1];
+  s += `<text x="${L + 6}" y="${y(n(lt.target)) - 6}" text-anchor="start" font-size="11" font-weight="600" fill="#111827">목표 ${n(lt.target).toLocaleString('ko-KR')}</text>`;
+  s += `<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="#d1d5db"/></svg>`;
+  $('monthly').innerHTML = s;
+}
+
+function renderFunnel(rows) {
+  if (!rows.length) { $('funnel').textContent = '데이터 없음'; return; }
+  const max = n(rows[0].count) || 1;
+  const shades = ['#1d4ed8', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd'];
+  let h = '<div class="funnel">';
+  rows.forEach((r, i) => {
+    if (i > 0) h += `<div class="conv">↓ <b>${pct(n(r.count) / n(rows[i - 1].count))}</b></div>`;
+    h += `<div class="fstep" style="width:${Math.max(45, n(r.count) / max * 100)}%;background:${shades[Math.min(i, shades.length - 1)]}">${esc(r.stage)}<span>${n(r.count).toLocaleString('ko-KR')}건</span></div>`;
+  });
+  h += `<div class="final"><span>최종 전환율 (${esc(rows[rows.length - 1].stage)} ÷ ${esc(rows[0].stage)})</span><b>${pct(n(rows[rows.length - 1].count) / max)}</b></div></div>`;
+  $('funnel').innerHTML = h;
+}
+
+function renderRank(el, rows) {
+  if (!rows.length) { el.textContent = '데이터 없음'; return; }
+  const max = Math.max(...rows.map(r => n(r.amount))) || 1;
+  el.innerHTML = rows.map((r, i) => `<div class="rrow"><span class="no">${i + 1}</span><span class="nm" title="${esc(r.name)}">${esc(r.name)}</span>
+    <span class="track"><i style="width:${(n(r.amount) / max * 100).toFixed(1)}%"></i></span><span class="amt">${won(r.amount)}</span></div>`).join('');
+}
+
+loadData().then(d => {
+  renderCards(d);
+  renderMonthly(d.monthly);
+  renderFunnel(d.pipeline);
+  const byAmt = (a, b) => n(b.amount) - n(a.amount);
+  renderRank($('person'), d.rank.filter(r => r.kind === 'person').sort(byAmt));
+  renderRank($('product'), d.rank.filter(r => r.kind === 'product').sort(byAmt));
+}).catch(e => {
+  $('notice').className = 'notice err';
+  $('notice').textContent = 'Supabase에서 숫자를 못 가져왔어요: ' + e.message + ' → 이 문장을 그대로 Claude에게 보여주세요.';
+  console.error(e);
+});
+</script>
+</body>
+</html>
